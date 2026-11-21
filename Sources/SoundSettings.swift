@@ -28,10 +28,16 @@ final class SoundSettings {
         didSet { defaults.set(muted, forKey: "muted") }
     }
 
+    /// Left and right played on each other's speaker, for speakers wired the wrong way round.
+    var swapped: Bool {
+        didSet { defaults.set(swapped, forKey: "swapped") }
+    }
+
     init() {
         volume = defaults.object(forKey: "volume") as? Double ?? 1
         balance = defaults.object(forKey: "balance") as? Double ?? 0
         muted = defaults.bool(forKey: "muted")
+        swapped = defaults.bool(forKey: "swapped")
     }
 
     /// Moves the volume one step up or down on the step grid, unmuting like the native keys do.

@@ -38,14 +38,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let engine = AudioEngine(deviceName: deviceName)
         let keys = MediaKeys { [weak self] key, fine in self?.volumeKey(key, fine: fine) ?? false }
         let menu = StatusMenu(settings: settings, engine: engine, keys: keys)
-        menu.onChange = { [weak self] in self?.applyGains() }
+        menu.onChange = { [weak self] in self?.applySound() }
         engine.onStateChange = { [weak menu] in menu?.refresh() }
         self.settings = settings
         self.engine = engine
         self.keys = keys
         self.menu = menu
 
-        applyGains()
+        applySound()
         engine.start()
         keys.start()
     }
@@ -56,9 +56,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    private func applyGains() {
-        guard let gains = settings?.gains else { return }
+    private func applySound() {
+        guard let settings else { return }
+        let gains = settings.gains
         Mixer.setGains(left: gains.left, right: gains.right, other: gains.other)
+        Mixer.setSwapped(settings.swapped)
     }
 
     /// Keys are Knob's only while the screen is the sound output; otherwise macOS handles them as usual.
@@ -69,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .down: settings.nudge(up: false, fine: fine)
         case .mute: settings.muted.toggle()
         }
-        applyGains()
+        applySound()
         menu?.refresh()
         hud.show(level: settings.volume, muted: settings.muted, below: menu?.button)
         return true

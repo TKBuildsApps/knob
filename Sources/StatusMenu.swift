@@ -1,6 +1,6 @@
 import AppKit
 
-/// The menu bar icon and its menu: volume, balance, mute, and any permission Knob still needs.
+/// The menu bar icon and its menu: volume, balance, mute, swapping sides, and any permission Knob still needs.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
     var onChange: (() -> Void)?
@@ -15,6 +15,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private let balanceSlider = NSSlider(value: 0, minValue: -1, maxValue: 1, target: nil, action: nil)
     private let balanceValue = NSTextField(labelWithString: "")
     private let muteItem = NSMenuItem(title: "Mute", action: #selector(toggleMute), keyEquivalent: "")
+    private let swapItem = NSMenuItem(title: "Swap Left and Right", action: #selector(toggleSwap), keyEquivalent: "")
     private let notice = NSMenuItem()
     private let audioPermissionItem = NSMenuItem(title: "Allow System Audio Recording…", action: #selector(openAudioSettings), keyEquivalent: "")
     private let keysPermissionItem = NSMenuItem(title: "Turn On Volume Keys…", action: #selector(openKeysSettings), keyEquivalent: "")
@@ -40,6 +41,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         muteItem.target = self
         menu.addItem(muteItem)
+        swapItem.target = self
+        swapItem.toolTip = "For speakers wired the wrong way round: plays the left side on the right speaker and the right side on the left."
+        menu.addItem(swapItem)
         notice.isEnabled = false
         menu.addItem(notice)
         audioPermissionItem.target = self
@@ -83,11 +87,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let side = Int((abs(settings.balance) * 100).rounded())
         balanceValue.stringValue = side == 0 ? "Centre" : "\(settings.balance < 0 ? "Left" : "Right") \(side)"
         muteItem.state = settings.muted ? .on : .off
+        swapItem.state = settings.swapped ? .on : .off
 
         let ready = engine.state == .ready
         volumeSlider.isEnabled = ready
         balanceSlider.isEnabled = ready
         muteItem.isEnabled = ready
+        swapItem.isEnabled = ready
         switch engine.state {
         case .ready: notice.title = ""
         case .waitingForScreen: notice.title = "Waiting for the screen’s sound…"
@@ -113,6 +119,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func toggleMute() {
         settings.muted.toggle()
+        changed()
+    }
+
+    @objc private func toggleSwap() {
+        settings.swapped.toggle()
         changed()
     }
 

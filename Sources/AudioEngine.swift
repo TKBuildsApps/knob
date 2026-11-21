@@ -228,8 +228,8 @@ final class AudioEngine {
     }
 }
 
-/// Volume and balance applied on the real-time audio thread. Gains travel as Float bit patterns in
-/// atomics: no locks and no allocation on that thread.
+/// Volume, balance and side swap applied on the real-time audio thread. Gains travel as Float bit
+/// patterns in atomics: no locks and no allocation on that thread.
 enum Mixer {
     private static let targetLeft = Atomic<UInt32>(0)
     private static let targetRight = Atomic<UInt32>(0)
@@ -237,6 +237,9 @@ enum Mixer {
     private static let currentLeft = Atomic<UInt32>(0)
     private static let currentRight = Atomic<UInt32>(0)
     private static let currentOther = Atomic<UInt32>(0)
+    /// 0 plays each side on its own channel, 1 plays it on the other one; in between is a crossfade.
+    private static let targetSwap = Atomic<UInt32>(0)
+    private static let currentSwap = Atomic<UInt32>(0)
     private static let leftChannel = Atomic<Int>(0)
     private static let rightChannel = Atomic<Int>(1)
 
@@ -247,17 +250,25 @@ enum Mixer {
         targetOther.store(other.bitPattern, ordering: .relaxed)
     }
 
-    /// Zero-based channels of the stereo pair; -1 for none (balance then has no effect).
+    /// Plays the left side on the right channel and the other way round, for speakers wired the
+    /// wrong way. `left` and `right` gains keep following the sides, so balance stays true to the ear.
+    static func setSwapped(_ swapped: Bool) {
+        targetSwap.store(Float(swapped ? 1 : 0).bitPattern, ordering: .relaxed)
+    }
+
+    /// Zero-based channels of the stereo pair; -1 for none (balance and swap then have no effect).
     static func setStereoPair(left: Int, right: Int) {
         leftChannel.store(left, ordering: .relaxed)
         rightChannel.store(right, ordering: .relaxed)
     }
 
-    /// Ramp up from silence on the next start instead of clicking in at full level.
+    /// Ramp up from silence on the next start instead of clicking in at full level. The swap needs
+    /// no crossfade out of silence, so it starts where it should be.
     static func fadeInOnNextStart() {
         currentLeft.store(Float(0).bitPattern, ordering: .relaxed)
         currentRight.store(Float(0).bitPattern, ordering: .relaxed)
         currentOther.store(Float(0).bitPattern, ordering: .relaxed)
+        currentSwap.store(targetSwap.load(ordering: .relaxed), ordering: .relaxed)
     }
 
     static func render(_ input: UnsafePointer<AudioBufferList>, _ output: UnsafeMutablePointer<AudioBufferList>) {
@@ -281,32 +292,49 @@ enum Mixer {
         let out = destinationData.assumingMemoryBound(to: Float.self)
         let leftIndex = leftChannel.load(ordering: .relaxed)
         let rightIndex = rightChannel.load(ordering: .relaxed)
+        // Swapping reads each side from the other channel, so both must lie inside this stream. If
+        // not, each channel reads only itself and the swap stays off.
+        let canSwap = (0..<channels).contains(leftIndex) && (0..<channels).contains(rightIndex)
+        let leftPartner = canSwap ? rightIndex : leftIndex
+        let rightPartner = canSwap ? leftIndex : rightIndex
 
         // Glide from the last gains to the new ones across the buffer, so changes never click.
         let toLeft = Float(bitPattern: targetLeft.load(ordering: .relaxed))
         let toRight = Float(bitPattern: targetRight.load(ordering: .relaxed))
         let toOther = Float(bitPattern: targetOther.load(ordering: .relaxed))
+        let toSwap = canSwap ? Float(bitPattern: targetSwap.load(ordering: .relaxed)) : 0
         var left = Float(bitPattern: currentLeft.load(ordering: .relaxed))
         var right = Float(bitPattern: currentRight.load(ordering: .relaxed))
         var other = Float(bitPattern: currentOther.load(ordering: .relaxed))
+        var swap = canSwap ? Float(bitPattern: currentSwap.load(ordering: .relaxed)) : 0
         let stepLeft = (toLeft - left) / Float(frames)
         let stepRight = (toRight - right) / Float(frames)
         let stepOther = (toOther - other) / Float(frames)
+        let stepSwap = (toSwap - swap) / Float(frames)
 
         for frame in 0..<frames {
             left += stepLeft
             right += stepRight
             other += stepOther
+            swap += stepSwap
             let from = frame * sourceStride
             let to = frame * destinationStride
             for channel in 0..<channels {
-                let gain = channel == leftIndex ? left : (channel == rightIndex ? right : other)
-                out[to + channel] = samples[from + channel] * gain
+                // At swap 0 the partner term is exactly zero, and at 1 the own term is, so a still
+                // swap (on or off) at full volume and centred balance stays sample for sample.
+                out[to + channel] = if channel == leftIndex {
+                    samples[from + channel] * left * (1 - swap) + samples[from + leftPartner] * right * swap
+                } else if channel == rightIndex {
+                    samples[from + channel] * right * (1 - swap) + samples[from + rightPartner] * left * swap
+                } else {
+                    samples[from + channel] * other
+                }
             }
         }
         currentLeft.store(toLeft.bitPattern, ordering: .relaxed)
         currentRight.store(toRight.bitPattern, ordering: .relaxed)
         currentOther.store(toOther.bitPattern, ordering: .relaxed)
+        currentSwap.store(toSwap.bitPattern, ordering: .relaxed)
     }
 }
 

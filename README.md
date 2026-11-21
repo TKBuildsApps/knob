@@ -17,9 +17,11 @@ Pick either one or both during setup.
 - **Volume keys work again** while the monitor is your sound output: up, down and mute. Hold
   Shift-Option for finer steps. With any other output (AirPods, the Mac's speakers), the keys work as usual.
 - **Volume, balance and mute** in the menu bar, plus a small level indicator while you press the keys.
-- **Your levels come back** every time you reconnect.
+- **Speakers the wrong way round?** Turn on **Swap Left and Right** in the menu. Each side then plays on the
+  other speaker, and the balance slider follows what you hear. No need to rewire anything.
+- **Your levels come back** every time you reconnect, and so does the swap.
 - **Nothing runs while the screen is unplugged.** macOS starts Knob when the screen appears.
-- **Light:** nothing at all while idle, about 1% CPU while sound plays, about 15 MB of memory, and about
+- **Light:** nothing at all while idle, about 1% CPU while sound plays, 15 to 25 MB of memory, and about
   11 ms of added delay, so video stays in sync.
 
 ## Requirements
@@ -68,8 +70,9 @@ again; if the volume keys stay silent after a reinstall, remove Knob from Access
   its DisplayPort link when there is no hub. A LaunchAgent starts Knob when the rule matches, and Knob
   quits when that same thing disappears.
 - **Sound.** A muted Core Audio process tap takes what every app sends to the screen. Knob applies your
-  volume and balance and plays the result back through a private aggregate device. At 100% volume and
-  centred balance, the output matches the input sample for sample.
+  volume, balance and the left/right swap, and plays the result back through a private aggregate device.
+  At 100% volume and centred balance, the output matches the input sample for sample (with the swap on,
+  the two sides trade places, still sample for sample).
 - **Sleeping.** The audio path runs only while an app is sending sound to the screen, and sleeps
   3 seconds after the last one stops. Waking takes about 17 ms, so a sound that starts after a silence
   can lose its very first moment.
@@ -82,7 +85,7 @@ Measured on an M5 MacBook Pro with macOS 26 and a Thunderbolt 4 monitor:
 | Wake-up after silence | ~17 ms |
 | CPU while idle | 0% |
 | CPU while sound plays | ~0.1% in Knob, plus ~0.8% in macOS's audio service |
-| Memory | ~15 MB |
+| Memory | ~15 MB at start, ~24 MB once sound has played |
 
 ## Troubleshooting
 
@@ -91,6 +94,8 @@ Measured on an M5 MacBook Pro with macOS 26 and a Thunderbolt 4 monitor:
 - **Volume keys do nothing:** check that the monitor is the selected sound output, and that Knob is on in
   System Settings > Privacy & Security > Accessibility. If it is on but the keys still do nothing (after a
   reinstall without a developer certificate), remove it from the list and add it back.
+- **Left and right are the wrong way round** (balance to the left plays on the right speaker): turn on
+  Swap Left and Right in the Knob menu.
 - **The menu says Knob needs System Audio Recording:** allow it in System Settings > Privacy &
   Security > Screen & System Audio Recording.
 - **Logs:** `log show --last 1h --predicate 'subsystem == "local.knob"'`
