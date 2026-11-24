@@ -23,6 +23,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     var button: NSStatusBarButton? { item.button }
 
+    /// Hidden while the screen is unplugged, when Knob was started at login and keeps running.
+    var isVisible: Bool {
+        get { item.isVisible }
+        set { item.isVisible = newValue }
+    }
+
     init(settings: SoundSettings, engine: AudioEngine, keys: MediaKeys) {
         self.settings = settings
         self.engine = engine
@@ -53,6 +59,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Knob", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
+        item.isVisible = true  // macOS remembers a hidden icon across launches; Knob starts shown.
         refresh()
     }
 

@@ -5,9 +5,15 @@ private let log = Logger(subsystem: "local.knob", category: "app")
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// When Knob watches the screen itself (started at login), how long the screen must stay away
+    /// before Knob lets go of it: screens on HDMI can drop off for a moment around sleep and wake.
+    private let unplugGrace: TimeInterval = 5
+
     private let hud = VolumeHUD()
     private var config: KnobConfig?
     private var presence: ScreenPresence?
+    private var isConnected = false
+    private var pendingUnplug: DispatchWorkItem?
     private var settings: SoundSettings?
     private var engine: AudioEngine?
     private var keys: MediaKeys?
@@ -15,16 +21,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let config = KnobConfig.load() else { return NSApp.terminate(nil) }
-        let presence = ScreenPresence(matching: config.match) { [weak self] in self?.screenUnplugged() }
-        presence.watch()  // Before the check, so an unplug right after it is not missed.
-        // At login the agent starts Knob whether or not the screen is there.
-        guard presence.isConnected else { return NSApp.terminate(nil) }
         self.config = config
+        let presence = ScreenPresence(config.presence) { [weak self] connected in self?.screenChanged(connected) }
+        presence.watch()  // Before the check, so a change right after it is not missed.
         self.presence = presence
-        log.notice("Screen \(config.screenName, privacy: .public) connected")
-
-        openApps()
-        if config.sound { startSoundControl(deviceName: config.screenName) }
+        if presence.isConnected {
+            screenConnected()
+        } else if config.startsAtLogin {
+            log.notice("Waiting for \(config.screenName, privacy: .public) to connect")
+        } else {
+            NSApp.terminate(nil)  // At login the agent starts Knob whether or not the screen is there.
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -50,10 +57,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keys.start()
     }
 
+    private func screenChanged(_ connected: Bool) {
+        guard let config else { return }
+        if connected {
+            pendingUnplug?.cancel()
+            pendingUnplug = nil
+            screenConnected()
+        } else if !config.startsAtLogin {
+            screenUnplugged()
+            NSApp.terminate(nil)  // launchd starts Knob again when the screen comes back.
+        } else if pendingUnplug == nil {
+            let unplug = DispatchWorkItem { [weak self] in
+                self?.pendingUnplug = nil
+                self?.screenUnplugged()
+            }
+            pendingUnplug = unplug
+            DispatchQueue.main.asyncAfter(deadline: .now() + unplugGrace, execute: unplug)
+        }
+    }
+
+    private func screenConnected() {
+        guard let config, !isConnected else { return }
+        isConnected = true
+        log.notice("Screen \(config.screenName, privacy: .public) connected")
+        openApps()
+        guard config.sound else { return }
+        if let menu {
+            menu.isVisible = true  // Back after an unplug; the audio path found the screen on its own.
+        } else {
+            startSoundControl(deviceName: config.screenName)
+        }
+    }
+
+    /// Quits the screen's apps and hides the menu bar icon. Started at login, Knob stays running: the
+    /// audio path follows the screen's sound device by itself, and the volume keys go back to macOS
+    /// as soon as the screen is no longer the sound output.
     private func screenUnplugged() {
+        guard isConnected else { return }
+        isConnected = false
         log.notice("Screen unplugged")
         quitApps()
-        NSApp.terminate(nil)
+        menu?.isVisible = false
     }
 
     private func applySound() {

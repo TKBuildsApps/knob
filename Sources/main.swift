@@ -2,7 +2,7 @@ import AppKit
 import XPC
 
 let usage = """
-    Usage: Knob                       run (launchd starts it when the screen connects)
+    Usage: Knob                       run (launchd starts it when the screen connects, or at login)
            Knob --setup               choose the screen, sound control and apps
            Knob --check               show the setup and whether the screen is connected
            Knob --write-agent [path]  write the LaunchAgent that starts Knob at path (default: this copy)
@@ -25,8 +25,8 @@ MainActor.assumeIsolated {
         break
     }
 
-    // launchd starts Knob when the screen appears. The event has to be taken off its stream, or
-    // launchd keeps delivering it.
+    // With a screen rule, launchd starts Knob when the screen appears. The event has to be taken off
+    // its stream, or launchd keeps delivering it. Started at login there is no stream, and this is a no-op.
     xpc_set_event_stream_handler("com.apple.iokit.matching", DispatchQueue.main) { _ in }
 
     let app = NSApplication.shared

@@ -1,7 +1,7 @@
 # Knob
 
-**Volume keys for your monitor's speakers.** A tiny Mac menu bar app that starts when your screen
-connects and quits when you unplug it.
+**Volume keys for your monitor's speakers.** A tiny Mac menu bar app that comes on when your screen
+connects and goes away when you unplug it.
 
 When sound goes to a monitor over Thunderbolt, USB-C, DisplayPort or HDMI (its own speakers, or speakers
 plugged into its headphone or line-out jack), macOS can't change the volume. The volume keys show a
@@ -20,7 +20,9 @@ Pick either one or both during setup.
 - **Speakers the wrong way round?** Turn on **Swap Left and Right** in the menu. Each side then plays on the
   other speaker, and the balance slider follows what you hear. No need to rewire anything.
 - **Your levels come back** every time you reconnect, and so does the swap.
-- **Nothing runs while the screen is unplugged.** macOS starts Knob when the screen appears.
+- **Nothing runs while the screen is unplugged** over Thunderbolt or DisplayPort: macOS starts Knob when
+  the screen appears. Over HDMI, Knob starts at login and sleeps until the screen appears: no CPU and
+  about 8 MB of memory.
 - **Light:** nothing at all while idle, about 1% CPU while sound plays, 15 to 25 MB of memory, and about
   11 ms of added delay, so video stays in sync.
 
@@ -28,16 +30,23 @@ Pick either one or both during setup.
 
 - A Mac with Apple silicon and macOS 15 or later (built and tested on macOS 26; Intel Macs untested)
 - Apple's command line tools, for building: `xcode-select --install`
-- A screen connected over Thunderbolt, USB-C or DisplayPort. HDMI is untested; setup tells you if it
-  can't recognise your screen.
+- A screen connected over Thunderbolt, USB-C, DisplayPort or HDMI. Knob is measured over Thunderbolt;
+  HDMI uses the same sound path but is less tested.
 
 ## Install
 
-Connect your screen, then:
+Connect your screen, then paste this into Terminal:
 
 ```sh
-git clone https://github.com/TKBuildsApps/knob.git
-cd knob
+zsh -c "$(curl -fsSL https://raw.githubusercontent.com/TKBuildsApps/knob/main/get.sh)"
+```
+
+It downloads Knob to `~/knob`, builds it and runs the installer. Run the same line again to update.
+To do it by hand instead:
+
+```sh
+git clone https://github.com/TKBuildsApps/knob.git ~/knob
+cd ~/knob
 ./install.sh
 ```
 
@@ -60,15 +69,18 @@ again; if the volume keys stay silent after a reinstall, remove Knob from Access
 ## Change or remove
 
 ```sh
-./install.sh --setup      # pick the screen, sound control and apps again
-./install.sh --uninstall  # remove Knob, its setup and its saved levels
+~/knob/install.sh --setup      # pick the screen, sound control and apps again
+~/knob/install.sh --uninstall  # remove Knob, its setup and its saved levels
 ```
 
 ## How it works
 
 - **Starting and stopping.** Setup writes a rule that recognises your screen: its Thunderbolt hub, or
   its DisplayPort link when there is no hub. A LaunchAgent starts Knob when the rule matches, and Knob
-  quits when that same thing disappears.
+  quits when that same thing disappears. An HDMI screen has neither, so the LaunchAgent starts Knob at
+  login instead, and Knob watches for the screen by name: it opens the apps and shows its icon when the
+  screen appears, and quits the apps and hides the icon 5 seconds after it goes (screens on HDMI can
+  drop off for a moment around sleep).
 - **Sound.** A muted Core Audio process tap takes what every app sends to the screen. Knob applies your
   volume, balance and the left/right swap, and plays the result back through a private aggregate device.
   At 100% volume and centred balance, the output matches the input sample for sample (with the swap on,

@@ -5,7 +5,7 @@ import IOKit
 /// A connected external screen and what Knob can do with it.
 struct DetectedScreen {
     let name: String
-    /// IOKit rule for the screen, or nil if Knob cannot tell when this screen comes and goes.
+    /// IOKit rule for the screen, or nil if it has none (as over HDMI): Knob then watches for it by name.
     let match: [String: Any]?
     let connection: String?
     let audio: HAL.Device?
@@ -31,7 +31,7 @@ enum Detect {
                 connection = "DisplayPort"
             }
             // Only keep a rule that finds the screen right now.
-            if let rule = match, !ScreenPresence(matching: rule).isConnected {
+            if let rule = match, !ScreenPresence(.registry(rule)).isConnected {
                 match = nil
                 connection = nil
             }
@@ -96,12 +96,14 @@ enum Setup {
             say("No external screen is connected. Connect it and run setup again.")
             return false
         }
-        let usable = screens.filter { $0.match != nil }
-        for screen in screens where screen.match == nil {
-            say("• \(screen.name): Knob can't tell when this screen connects, so it can't be used.")
+        guard let screen = pick(screens) else { return false }
+        if let connection = screen.connection {
+            say("Screen: \(screen.name) (\(connection))")
+        } else {
+            say("Screen: \(screen.name)")
+            say("It has no Thunderbolt or DisplayPort link to watch (HDMI, perhaps), so Knob will start at")
+            say("login and wake up when this screen connects.")
         }
-        guard let screen = pick(usable) else { return false }
-        say("Screen: \(screen.name) (\(screen.connection ?? "?"))")
 
         var sound = false
         if screen.audio == nil {
@@ -137,7 +139,7 @@ enum Setup {
             say("\nNothing to do: choose sound control, an app, or both.")
             return false
         }
-        let config = KnobConfig(screenName: screen.name, match: screen.match!, sound: sound, apps: apps)
+        let config = KnobConfig(screenName: screen.name, match: screen.match, sound: sound, apps: apps)
         do {
             try config.save()
         } catch {
@@ -155,7 +157,8 @@ enum Setup {
             return false
         }
         say("Knob: \(summary(config))")
-        say("Screen connected now: \(ScreenPresence(matching: config.match).isConnected ? "yes" : "no")")
+        say("Starts: \(config.startsAtLogin ? "at login, then waits for the screen" : "when the screen connects")")
+        say("Screen connected now: \(ScreenPresence(config.presence).isConnected ? "yes" : "no")")
         if config.sound {
             if let device = HAL.outputDevice(named: config.screenName) {
                 say("Sound output: \(device.uid)\(HAL.hasOwnVolume(device.id) ? " (has its own volume control)" : "")")
@@ -169,7 +172,7 @@ enum Setup {
         return true
     }
 
-    /// Writes the LaunchAgent that starts `program` when the screen connects.
+    /// Writes the LaunchAgent that starts `program`: when the screen connects, or at login.
     static func writeAgent(program: String) -> Bool {
         guard let config = KnobConfig.load() else {
             say("Knob isn't set up yet. Run ./install.sh --setup")
@@ -191,7 +194,7 @@ enum Setup {
     private static func pick(_ screens: [DetectedScreen]) -> DetectedScreen? {
         switch screens.count {
         case 0:
-            say("No screen Knob can use is connected.")
+            say("No external screen is connected.")
             return nil
         case 1:
             return screens[0]

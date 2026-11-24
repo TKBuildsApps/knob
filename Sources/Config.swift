@@ -15,8 +15,10 @@ struct KnobConfig {
 
     /// The screen's name as macOS shows it, e.g. "DELL U4025QW". Its audio device carries the same name.
     var screenName: String
-    /// IOKit matching rule for something that exists exactly while the screen is connected.
-    var match: [String: Any]
+    /// IOKit matching rule for something that exists exactly while the screen is connected (its
+    /// Thunderbolt hub or DisplayPort link). nil when there is none, as over HDMI: Knob then starts
+    /// at login and watches for the screen by name.
+    var match: [String: Any]?
     /// Whether Knob controls the screen's sound (volume keys, volume, balance).
     var sound: Bool
     /// Apps opened when the screen connects and quit when it is unplugged.
@@ -33,6 +35,14 @@ struct KnobConfig {
         "com.logitech.logitune": ["--tray"],
     ]
 
+    /// Whether Knob starts at login and waits for the screen, rather than being started by it.
+    var startsAtLogin: Bool { match == nil }
+
+    /// How to tell whether the screen is connected.
+    var presence: ScreenPresence.Source {
+        match.map { .registry($0) } ?? .display(name: screenName)
+    }
+
     static func load() -> KnobConfig? {
         guard let data = try? Data(contentsOf: fileURL) else {
             log.error("No setup found at \(fileURL.path, privacy: .public); run ./install.sh")
@@ -41,11 +51,19 @@ struct KnobConfig {
         guard let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let screen = plist["Screen"] as? [String: Any],
               let name = screen["Name"] as? String, !name.isEmpty,
-              let match = screen["Match"] as? [String: Any], match["IOProviderClass"] is String,
               let sound = plist["Sound"] as? Bool
         else {
             log.error("config.plist is incomplete; run ./install.sh --setup")
             return nil
+        }
+        // No rule means "watch by name"; a rule that is there must be usable.
+        var match: [String: Any]?
+        if let rule = screen["Match"] {
+            guard let rule = rule as? [String: Any], rule["IOProviderClass"] is String else {
+                log.error("config.plist has an unusable screen rule; run ./install.sh --setup")
+                return nil
+            }
+            match = rule
         }
         let apps = (plist["Apps"] as? [[String: Any]] ?? []).compactMap { entry -> App? in
             guard let id = entry["BundleID"] as? String, !id.isEmpty else { return nil }
@@ -55,8 +73,10 @@ struct KnobConfig {
     }
 
     func save() throws {
+        var screen: [String: Any] = ["Name": screenName]
+        if let match { screen["Match"] = match }
         let plist: [String: Any] = [
-            "Screen": ["Name": screenName, "Match": match],
+            "Screen": screen,
             "Sound": sound,
             "Apps": apps.map { ["BundleID": $0.bundleID, "Arguments": $0.arguments] },
         ]
@@ -65,17 +85,21 @@ struct KnobConfig {
         try data.write(to: Self.fileURL, options: .atomic)
     }
 
-    /// The LaunchAgent that starts `program` when the screen appears. Nothing runs while it is unplugged.
+    /// The LaunchAgent for `program`. With a rule it starts Knob when the screen appears, and nothing
+    /// runs while the screen is unplugged. Without one it starts Knob at login, to wait for the screen.
     func launchAgent(program: String) -> [String: Any] {
-        var trigger = match
-        trigger["IOMatchLaunchStream"] = true
-        return [
+        var agent: [String: Any] = [
             "Label": Self.label,
             "Program": program,
-            "RunAtLoad": true,  // Covers login with the screen already connected; Knob quits if it is not.
+            // At login. With a rule this covers a screen that is already connected; Knob quits if it is not.
+            "RunAtLoad": true,
             "KeepAlive": ["Crashed": true],
             "LimitLoadToSessionType": "Aqua",
-            "LaunchEvents": ["com.apple.iokit.matching": ["\(Self.label).screen": trigger]],
         ]
+        if var trigger = match {
+            trigger["IOMatchLaunchStream"] = true
+            agent["LaunchEvents"] = ["com.apple.iokit.matching": ["\(Self.label).screen": trigger]]
+        }
+        return agent
     }
 }
